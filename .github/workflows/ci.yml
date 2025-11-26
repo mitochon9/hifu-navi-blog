@@ -39,7 +39,6 @@ jobs:
     outputs:
       client: ${{ steps.filter.outputs.client }}
       api-service: ${{ steps.filter.outputs.api-service }}
-      worker-node: ${{ steps.filter.outputs.worker-node }}
       packagesAll: ${{ steps.filter.outputs.packagesAll }}
       deps: ${{ steps.filter.outputs.deps }}
     steps:
@@ -60,10 +59,6 @@ jobs:
               - 'packages/database/**'
               - 'packages/server-kit/**'
               - 'packages/result/**'
-            worker-node:
-              - 'apps/worker-node/**'
-              - 'packages/server-kit/**'
-              - 'packages/result/**'
             packagesAll:
               - 'packages/**'
             deps:
@@ -75,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     timeout-minutes: 20
-    if: needs.changes.outputs.client == 'true' || needs.changes.outputs.api-service == 'true' || needs.changes.outputs.worker-node == 'true' || needs.changes.outputs.packagesAll == 'true'
+    if: needs.changes.outputs.client == 'true' || needs.changes.outputs.api-service == 'true' || needs.changes.outputs.packagesAll == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -163,9 +158,6 @@ jobs:
           if [[ "${{ needs.changes.outputs.api-service }}" == "true" ]]; then
             FILTERS="$FILTERS --filter=api-service"
           fi
-          if [[ "${{ needs.changes.outputs.worker-node }}" == "true" ]]; then
-            FILTERS="$FILTERS --filter=worker-node"
-          fi
 
           if [[ -z "$FILTERS" ]]; then
             echo "No specific app changes; running lint/typecheck across repo"
@@ -215,9 +207,6 @@ jobs:
           fi
           if [[ "${{ needs.changes.outputs.api-service }}" == "true" ]]; then
             FILTERS="$FILTERS --filter=api-service"
-          fi
-          if [[ "${{ needs.changes.outputs.worker-node }}" == "true" ]]; then
-            FILTERS="$FILTERS --filter=worker-node"
           fi
           if [[ -z "$FILTERS" ]]; then
             echo "No changes detected, skip build"
