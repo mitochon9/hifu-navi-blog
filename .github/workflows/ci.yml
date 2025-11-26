@@ -174,10 +174,10 @@ jobs:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ github.ref }}-${{ hashFiles('**/turbo.json', '**/package.json') }}
 
-      - name: Architecture & FSD Checks (no knip)
+      - name: Architecture & FSD Checks
         run: |
           echo "🏗️ Running Architecture & FSD Checks in main pipeline..."
-          SKIP_KNIP=1 bash scripts/architecture-check.sh
+          bash scripts/architecture-check.sh
 
       - name: Build changed packages for PR
         if: github.event_name == 'pull_request'
@@ -212,114 +212,6 @@ jobs:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ github.ref }}-${{ hashFiles('**/turbo.json', '**/package.json') }}
 
-
-  knip-unused-code:
-    name: Unused Code Check (Knip)
-    runs-on: ubuntu-latest
-    needs: changes
-    # ラベル 'run:knip' が付いたPR、またはスケジュール時のみ
-    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run:knip'))
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.2.22'
-      - name: Restore Bun cache
-        id: bun-cache-knip
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Save Bun cache
-        if: steps.bun-cache-knip.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-      - name: Run Knip Check
-        id: knip
-        run: |
-          set -euo pipefail
-          NO_COLOR=1 bunx knip > knip-raw.txt 2>&1 || true
-          UNUSED_FILES=$(grep -E "^Unused files \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' || echo "0")
-          UNUSED_DEPS=$(grep -E "^Unused (dependencies|devDependencies) \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' | paste -sd+ | bc 2>/dev/null || echo "0")
-          UNUSED_EXPORTS=$(grep -E "^Unused exports \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' || echo "0")
-          UNUSED_FILES=${UNUSED_FILES:-0}
-          UNUSED_DEPS=${UNUSED_DEPS:-0}
-          UNUSED_EXPORTS=${UNUSED_EXPORTS:-0}
-          {
-            echo "## 🔍 Unused Code Check Results";
-            echo;
-            echo "### 📊 サマリー";
-            echo;
-            echo "| 項目 | 件数 |";
-            echo "|------|------|";
-            echo "| 未使用ファイル | $UNUSED_FILES |";
-            echo "| 未使用依存関係 | $UNUSED_DEPS |";
-            echo "| 未使用エクスポート | $UNUSED_EXPORTS |";
-            echo;
-            if [ "$UNUSED_FILES" != "0" ] || [ "$UNUSED_DEPS" != "0" ] || [ "$UNUSED_EXPORTS" != "0" ]; then
-              echo "### ⚠️ 結果: 未使用コードあり";
-              echo;
-              echo "<details>";
-              echo "<summary>Knip 出力を表示</summary>";
-              echo;
-              echo '```';
-              head -n 1000 knip-raw.txt || true;
-              echo '```';
-              echo "</details>";
-            else
-              echo "### ✅ 結果: 問題なし";
-              echo "未使用のコードは検出されませんでした。";
-            fi
-          } > knip-report.md
-      - name: Upload Knip Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: knip-report
-          path: knip-report.md
-      - name: Post Knip result as PR comment (sticky)
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('knip-report.md', 'utf8');
-            const marker = '## 🔍 Unused Code Check Results';
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
-            });
-            const botComment = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
 
   bun-audit-pr:
     name: bun audit (Report)
