@@ -38,8 +38,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       client: ${{ steps.filter.outputs.client }}
-      server-node: ${{ steps.filter.outputs.server-node }}
-      worker-node: ${{ steps.filter.outputs.worker-node }}
+      api-service: ${{ steps.filter.outputs.api-service }}
       packagesAll: ${{ steps.filter.outputs.packagesAll }}
       deps: ${{ steps.filter.outputs.deps }}
     steps:
@@ -55,13 +54,9 @@ jobs:
               - 'packages/result/**'
               - 'packages/typescript-config/**'
               - 'packages/tailwind-config/**'
-            server-node:
-              - 'apps/server-node/**'
+            api-service:
+              - 'apps/api-service/**'
               - 'packages/database/**'
-              - 'packages/server-kit/**'
-              - 'packages/result/**'
-            worker-node:
-              - 'apps/worker-node/**'
               - 'packages/server-kit/**'
               - 'packages/result/**'
             packagesAll:
@@ -75,7 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     timeout-minutes: 20
-    if: needs.changes.outputs.client == 'true' || needs.changes.outputs.server-node == 'true' || needs.changes.outputs.worker-node == 'true' || needs.changes.outputs.packagesAll == 'true'
+    if: needs.changes.outputs.client == 'true' || needs.changes.outputs.api-service == 'true' || needs.changes.outputs.packagesAll == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -160,11 +155,8 @@ jobs:
           if [[ "${{ needs.changes.outputs.client }}" == "true" ]]; then
             FILTERS="$FILTERS --filter=client"
           fi
-          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
-            FILTERS="$FILTERS --filter=server-node"
-          fi
-          if [[ "${{ needs.changes.outputs.worker-node }}" == "true" ]]; then
-            FILTERS="$FILTERS --filter=worker-node"
+          if [[ "${{ needs.changes.outputs.api-service }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=api-service"
           fi
 
           if [[ -z "$FILTERS" ]]; then
@@ -175,14 +167,6 @@ jobs:
             bunx turbo run lint typecheck --concurrency=4 --cache-dir=.turbo $FILTERS
           fi
 
-          # server-node のユニットテストのみ（DB不要）
-          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
-            echo "Running server-node unit tests with coverage"
-            bunx turbo run test:unit --concurrency=2 --cache-dir=.turbo --filter=server-node -- --coverage
-          else
-            echo "Skip unit tests (server-node unchanged)"
-          fi
-
       - name: Save Turbo cache
         if: always()
         uses: actions/cache/save@v4
@@ -190,18 +174,10 @@ jobs:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ github.ref }}-${{ hashFiles('**/turbo.json', '**/package.json') }}
 
-      - name: Architecture & FSD Checks (no knip)
+      - name: Architecture & FSD Checks
         run: |
           echo "🏗️ Running Architecture & FSD Checks in main pipeline..."
-          SKIP_KNIP=1 bash scripts/architecture-check.sh
-
-      - name: Upload unit test coverage (server-node)
-        if: needs.changes.outputs.server-node == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-unit-server-node
-          path: apps/server-node/coverage
-          retention-days: 14
+          bash scripts/architecture-check.sh
 
       - name: Build changed packages for PR
         if: github.event_name == 'pull_request'
@@ -213,11 +189,8 @@ jobs:
           if [[ "${{ needs.changes.outputs.client }}" == "true" ]]; then
             FILTERS="$FILTERS --filter=client"
           fi
-          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
-            FILTERS="$FILTERS --filter=server-node"
-          fi
-          if [[ "${{ needs.changes.outputs.worker-node }}" == "true" ]]; then
-            FILTERS="$FILTERS --filter=worker-node"
+          if [[ "${{ needs.changes.outputs.api-service }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=api-service"
           fi
           if [[ -z "$FILTERS" ]]; then
             echo "No changes detected, skip build"
@@ -239,114 +212,6 @@ jobs:
           path: .turbo
           key: ${{ runner.os }}-turbo-${{ github.ref }}-${{ hashFiles('**/turbo.json', '**/package.json') }}
 
-
-  knip-unused-code:
-    name: Unused Code Check (Knip)
-    runs-on: ubuntu-latest
-    needs: changes
-    # ラベル 'run:knip' が付いたPR、またはスケジュール時のみ
-    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run:knip'))
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.2.22'
-      - name: Restore Bun cache
-        id: bun-cache-knip
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-      - name: Save Bun cache
-        if: steps.bun-cache-knip.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-      - name: Run Knip Check
-        id: knip
-        run: |
-          set -euo pipefail
-          NO_COLOR=1 bunx knip > knip-raw.txt 2>&1 || true
-          UNUSED_FILES=$(grep -E "^Unused files \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' || echo "0")
-          UNUSED_DEPS=$(grep -E "^Unused (dependencies|devDependencies) \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' | paste -sd+ | bc 2>/dev/null || echo "0")
-          UNUSED_EXPORTS=$(grep -E "^Unused exports \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' || echo "0")
-          UNUSED_FILES=${UNUSED_FILES:-0}
-          UNUSED_DEPS=${UNUSED_DEPS:-0}
-          UNUSED_EXPORTS=${UNUSED_EXPORTS:-0}
-          {
-            echo "## 🔍 Unused Code Check Results";
-            echo;
-            echo "### 📊 サマリー";
-            echo;
-            echo "| 項目 | 件数 |";
-            echo "|------|------|";
-            echo "| 未使用ファイル | $UNUSED_FILES |";
-            echo "| 未使用依存関係 | $UNUSED_DEPS |";
-            echo "| 未使用エクスポート | $UNUSED_EXPORTS |";
-            echo;
-            if [ "$UNUSED_FILES" != "0" ] || [ "$UNUSED_DEPS" != "0" ] || [ "$UNUSED_EXPORTS" != "0" ]; then
-              echo "### ⚠️ 結果: 未使用コードあり";
-              echo;
-              echo "<details>";
-              echo "<summary>Knip 出力を表示</summary>";
-              echo;
-              echo '```';
-              head -n 1000 knip-raw.txt || true;
-              echo '```';
-              echo "</details>";
-            else
-              echo "### ✅ 結果: 問題なし";
-              echo "未使用のコードは検出されませんでした。";
-            fi
-          } > knip-report.md
-      - name: Upload Knip Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: knip-report
-          path: knip-report.md
-      - name: Post Knip result as PR comment (sticky)
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('knip-report.md', 'utf8');
-            const marker = '## 🔍 Unused Code Check Results';
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
-            });
-            const botComment = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
 
   bun-audit-pr:
     name: bun audit (Report)
@@ -447,102 +312,4 @@ jobs:
                 body,
               });
             }
-
-  server-node-integration-tests:
-    name: Server Node Integration Tests
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.server-node == 'true'
-    timeout-minutes: 20
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 15432:5432
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.2.22'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Restore Bun cache
-        id: bun-cache-int
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-
-      - name: Restore Prisma cache
-        id: prisma-cache-int
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            packages/database/node_modules/.prisma
-            packages/database/node_modules/@prisma
-          key: ${{ runner.os }}-prisma-${{ hashFiles('packages/database/prisma/schema.prisma', 'packages/database/prisma/**/*.prisma') }}
-          restore-keys: |
-            ${{ runner.os }}-prisma-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Save Bun cache
-        if: steps.bun-cache-int.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-
-      - name: Generate Prisma Client
-        if: steps.prisma-cache-int.outputs.cache-hit != 'true'
-        run: |
-          cd packages/database
-          bun run db:generate
-        env:
-          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
-
-      - name: Save Prisma cache
-        if: steps.prisma-cache-int.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            packages/database/node_modules/.prisma
-            packages/database/node_modules/@prisma
-          key: ${{ runner.os }}-prisma-${{ hashFiles('packages/database/prisma/schema.prisma', 'packages/database/prisma/**/*.prisma') }}
-      - name: Prepare database schema
-        run: |
-          cd packages/database
-          DATABASE_URL="postgresql://postgres:postgres@localhost:15432/test_db" bun run db:deploy
-      - name: Run server-node integration tests (with coverage)
-        working-directory: apps/server-node
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:15432/test_db
-          CI: true
-        run: bun run coverage:integration
-      - name: Upload integration test coverage (server-node)
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-integration-server-node
-          path: apps/server-node/coverage
-          retention-days: 14
-
 

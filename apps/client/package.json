@@ -3,9 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "cd ../../packages/server-kit && bun run types && cd ../../apps/server-node && bun run types",
-    "pretypecheck": "cd ../../packages/server-kit && bun run types && cd ../../apps/server-node && bun run types",
-    "prebuild": "cd ../../packages/server-kit && bun run types && cd ../../apps/server-node && bun run types",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -17,20 +14,12 @@
     "dep:graph": "madge app --ts-config tsconfig.json --extensions ts,tsx --image ../../docs/client-deps.svg --exclude 'node_modules|.next|dist'"
   },
   "dependencies": {
-    "@radix-ui/react-slot": "^1.2.4",
-    "@repo/api-client": "workspace:*",
-    "@repo/contracts": "workspace:*",
-    "@repo/result": "workspace:*",
-    "@repo/ui": "workspace:*",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.553.0",
     "next": "16.0.1",
     "postcss": "^8.5.6",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "tailwind-merge": "^3.4.0",
-    "zod": "^4.1.12"
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
     "@repo/tailwind-config": "workspace:*",

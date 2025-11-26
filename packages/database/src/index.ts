@@ -13,6 +13,4 @@ if (process.env.NODE_ENV !== "production") {
 export type {
   Prisma,
   PrismaClient,
-  TaskJob,
-  User,
 } from "@prisma/client";
