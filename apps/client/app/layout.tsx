@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Noto_Sans_JP } from "next/font/google";
-import { Footer, Header } from "@/components/layout";
+import { cn } from "@/shared/lib/utils";
+import { Footer, Header } from "@/widgets/layout";
 import "./globals.css";
 
 const notoSansJP = Noto_Sans_JP({
@@ -32,7 +33,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body className={`${notoSansJP.variable} ${jetBrainsMono.variable} font-sans antialiased`}>
+      <body className={cn(notoSansJP.variable, jetBrainsMono.variable, "font-sans antialiased")}>
         <div className="flex min-h-screen flex-col">
           <Header />
           <main className="flex-1">{children}</main>

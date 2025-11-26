@@ -1,7 +1,15 @@
-import { ExternalLink } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { DateDisplay, PriceDisplay, SourceLink } from "@/components/common";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Clinic, Plan, PriceEntry } from "@/lib/mock";
 import {
@@ -109,17 +117,25 @@ export default async function DeviceDetailPage({ params }: Props) {
     <div className="py-8 sm:py-12">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
         {/* Breadcrumb */}
-        <nav className="mb-4 text-sm text-muted-foreground">
-          <Link href="/" className="hover:text-foreground">
-            ホーム
-          </Link>
-          <span className="mx-2">/</span>
-          <Link href="/devices" className="hover:text-foreground">
-            機種一覧
-          </Link>
-          <span className="mx-2">/</span>
-          <span>{device.nameOfficial}</span>
-        </nav>
+        <Breadcrumb className="mb-4">
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link href="/">ホーム</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbLink asChild>
+                <Link href="/devices">機種一覧</Link>
+              </BreadcrumbLink>
+            </BreadcrumbItem>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              <BreadcrumbPage>{device.nameOfficial}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
 
         {/* Device Header */}
         <div className="mb-8">
@@ -174,9 +190,12 @@ export default async function DeviceDetailPage({ params }: Props) {
                             {BODY_PART[range.bodyPart as keyof typeof BODY_PART]}
                           </td>
                           <td className="px-4 py-3 text-right font-medium price-display">
-                            ¥{range.min.toLocaleString()}
+                            <PriceDisplay price={range.min} />
                             {range.min !== range.max && (
-                              <span> 〜 ¥{range.max.toLocaleString()}</span>
+                              <span>
+                                {" "}
+                                〜 <PriceDisplay price={range.max} />
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -224,7 +243,7 @@ export default async function DeviceDetailPage({ params }: Props) {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">価格帯</span>
                       <span className="font-medium price-display">
-                        ¥{Math.min(...priceRanges.map((r) => r.min)).toLocaleString()}〜
+                        <PriceDisplay price={Math.min(...priceRanges.map((r) => r.min))} />〜
                       </span>
                     </div>
                   )}
@@ -279,9 +298,10 @@ function ClinicPlanCard({ plan }: { plan: PlanWithDetails }) {
 
           <div className="flex flex-col items-end gap-1">
             <div className="text-right">
-              <span className="text-lg font-bold text-foreground price-display">
-                ¥{lowestPrice.toLocaleString()}
-              </span>
+              <PriceDisplay
+                price={lowestPrice}
+                className="text-lg font-bold text-foreground price-display"
+              />
               <span className="ml-1 text-xs text-muted-foreground">〜</span>
             </div>
             <div className="flex flex-wrap justify-end gap-1">
@@ -300,17 +320,11 @@ function ClinicPlanCard({ plan }: { plan: PlanWithDetails }) {
         {/* Source Info */}
         {latestEntry && (
           <div className="mt-3 flex items-center gap-2 border-t border-border/40 pt-3 text-xs text-muted-foreground/70">
-            <span>確認日: {latestEntry.confirmedDate.toLocaleDateString("ja-JP")}</span>
+            <span>
+              確認日: <DateDisplay date={latestEntry.confirmedDate} />
+            </span>
             <span>|</span>
-            <a
-              href={latestEntry.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 hover:text-primary"
-            >
-              根拠URL
-              <ExternalLink className="h-3 w-3" />
-            </a>
+            <SourceLink priceEntry={latestEntry} showDate={false} variant="link" />
           </div>
         )}
       </CardContent>

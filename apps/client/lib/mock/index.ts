@@ -18,4 +18,22 @@ export {
   mockPlans,
   mockPriceEntries,
 } from "./plans";
-export * from "./types";
+export {
+  BODY_PART,
+  type BodyPart,
+  type Clinic,
+  type ClinicWithPlans,
+  type Device,
+  type DeviceWithClinics,
+  type Plan,
+  type PlanWithPrice,
+  PREFECTURE,
+  PRICE_TYPE,
+  type Prefecture,
+  type PriceEntry,
+  type PriceType,
+  STATUS,
+  type Status,
+  UNIT_TYPE,
+  type UnitType,
+} from "./types";

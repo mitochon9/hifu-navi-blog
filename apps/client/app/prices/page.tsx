@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { PriceDisplay } from "@/components/common";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   BODY_PART,
@@ -303,13 +304,13 @@ function DevicePriceCard({
                     {BODY_PART[stat.bodyPart as keyof typeof BODY_PART]}
                   </td>
                   <td className="px-4 py-2 text-right font-medium text-primary price-display">
-                    ¥{stat.min.toLocaleString()}
+                    <PriceDisplay price={stat.min} />
                   </td>
                   <td className="px-4 py-2 text-right text-muted-foreground price-display">
-                    ¥{stat.avg.toLocaleString()}
+                    <PriceDisplay price={stat.avg} />
                   </td>
                   <td className="px-4 py-2 text-right text-muted-foreground price-display">
-                    ¥{stat.max.toLocaleString()}
+                    <PriceDisplay price={stat.max} />
                   </td>
                   <td className="px-4 py-2 text-right text-xs text-muted-foreground">
                     {stat.prices.length}件

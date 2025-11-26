@@ -10,7 +10,9 @@ import {
 } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { getPublishedClinics, getPublishedDevices } from "@/lib/mock";
 
 export const metadata: Metadata = {
@@ -143,18 +145,19 @@ export default function Home() {
 function SearchBar() {
   return (
     <div className="relative">
-      <input
+      <Input
         type="text"
         placeholder="エリア・駅名・機種名で検索..."
-        className="h-14 w-full rounded-xl border border-border bg-background px-5 pr-12 text-base shadow-sm transition-shadow placeholder:text-muted-foreground/60 focus:border-primary focus:shadow-md focus:outline-none"
+        className="h-14 rounded-xl px-5 pr-12 text-base shadow-sm"
       />
-      <button
+      <Button
         type="button"
-        className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-colors hover:bg-primary/90"
+        size="icon"
+        className="absolute right-2 top-1/2 h-10 w-10 -translate-y-1/2 rounded-lg"
         aria-label="検索"
       >
         <Search className="h-5 w-5" />
-      </button>
+      </Button>
     </div>
   );
 }
@@ -171,17 +174,12 @@ function QuickAccessButton({
   primary?: boolean;
 }) {
   return (
-    <Link
-      href={href}
-      className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
-        primary
-          ? "bg-primary text-primary-foreground hover:bg-primary/90"
-          : "border border-border bg-background text-foreground hover:bg-accent"
-      }`}
-    >
-      {icon}
-      {children}
-    </Link>
+    <Button asChild variant={primary ? "default" : "outline"}>
+      <Link href={href}>
+        {icon}
+        {children}
+      </Link>
+    </Button>
   );
 }
 
@@ -202,13 +200,12 @@ function SectionHeader({
         <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">{title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       </div>
-      <Link
-        href={href}
-        className="group inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
-      >
-        {linkText}
-        <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-      </Link>
+      <Button asChild variant="link" className="group">
+        <Link href={href}>
+          {linkText}
+          <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+        </Link>
+      </Button>
     </div>
   );
 }

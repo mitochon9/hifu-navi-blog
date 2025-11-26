@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getPlansForDevice, getPriceEntriesForPlan, getPublishedDevices } from "@/lib/mock";
+import { cn } from "@/shared/lib/utils";
 
 export const metadata: Metadata = {
   title: "HIFU機種一覧",
@@ -90,11 +91,12 @@ function FilterBadge({
   return (
     <button
       type="button"
-      className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+      className={cn(
+        "rounded-full px-3 py-1 text-sm font-medium transition-colors",
         active
           ? "bg-primary text-primary-foreground"
           : "border border-border bg-background text-muted-foreground hover:bg-accent"
-      }`}
+      )}
     >
       {children}
     </button>
