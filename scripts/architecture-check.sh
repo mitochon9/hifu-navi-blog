@@ -67,6 +67,10 @@ run_step() {
             tail -n 100 "$OUT" | sed -e 's/^/  • /'
           fi
           ;;
+        *knip*)
+          # knipの出力は全体を表示（重要情報が多いため）
+          cat "$OUT" | sed -e 's/^/  • /'
+          ;;
         *)
           # 重要行だけダイジェスト
           { grep -E "(ERROR|Error|error|✖|failed|violation)" "$OUT" || true; } | head -n 10 | sed -e 's/^/  • /'
