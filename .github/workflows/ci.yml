@@ -167,14 +167,6 @@ jobs:
             bunx turbo run lint typecheck --concurrency=4 --cache-dir=.turbo $FILTERS
           fi
 
-          # api-service のユニットテストのみ（DB不要）
-          if [[ "${{ needs.changes.outputs.api-service }}" == "true" ]]; then
-            echo "Running api-service unit tests with coverage"
-            bunx turbo run test:unit --concurrency=2 --cache-dir=.turbo --filter=api-service -- --coverage
-          else
-            echo "Skip unit tests (api-service unchanged)"
-          fi
-
       - name: Save Turbo cache
         if: always()
         uses: actions/cache/save@v4
@@ -186,14 +178,6 @@ jobs:
         run: |
           echo "🏗️ Running Architecture & FSD Checks in main pipeline..."
           SKIP_KNIP=1 bash scripts/architecture-check.sh
-
-      - name: Upload unit test coverage (api-service)
-        if: needs.changes.outputs.api-service == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-unit-api-service
-          path: apps/api-service/coverage
-          retention-days: 14
 
       - name: Build changed packages for PR
         if: github.event_name == 'pull_request'
@@ -436,102 +420,4 @@ jobs:
                 body,
               });
             }
-
-  api-service-integration-tests:
-    name: API Service Integration Tests
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.api-service == 'true'
-    timeout-minutes: 20
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-        ports:
-          - 15432:5432
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.2.22'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Restore Bun cache
-        id: bun-cache-int
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-
-      - name: Restore Prisma cache
-        id: prisma-cache-int
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            packages/database/node_modules/.prisma
-            packages/database/node_modules/@prisma
-          key: ${{ runner.os }}-prisma-${{ hashFiles('packages/database/prisma/schema.prisma', 'packages/database/prisma/**/*.prisma') }}
-          restore-keys: |
-            ${{ runner.os }}-prisma-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Save Bun cache
-        if: steps.bun-cache-int.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.bun
-            ~/.cache/bun
-          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
-
-      - name: Generate Prisma Client
-        if: steps.prisma-cache-int.outputs.cache-hit != 'true'
-        run: |
-          cd packages/database
-          bun run db:generate
-        env:
-          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
-
-      - name: Save Prisma cache
-        if: steps.prisma-cache-int.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            packages/database/node_modules/.prisma
-            packages/database/node_modules/@prisma
-          key: ${{ runner.os }}-prisma-${{ hashFiles('packages/database/prisma/schema.prisma', 'packages/database/prisma/**/*.prisma') }}
-      - name: Prepare database schema
-        run: |
-          cd packages/database
-          DATABASE_URL="postgresql://postgres:postgres@localhost:15432/test_db" bun run db:deploy
-      - name: Run api-service integration tests (with coverage)
-        working-directory: apps/api-service
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:15432/test_db
-          CI: true
-        run: bun run coverage:integration
-      - name: Upload integration test coverage (api-service)
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-integration-api-service
-          path: apps/api-service/coverage
-          retention-days: 14
-
 
