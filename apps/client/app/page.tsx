@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import { ServerDemo } from "@/widgets/demo";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/shared/lib/utils";
 
 export const metadata: Metadata = {
   title: "Home",
   description: "ax-saas-template のホームページ",
 };
-
-// 動的レンダリングを強制（ビルド時にAPIを呼び出さない）
-// データキャッシュは fetch の next.revalidate で制御
-export const dynamic = "force-dynamic";
 
 export default async function Home() {
   return (
@@ -23,8 +20,7 @@ export default async function Home() {
           height={20}
           priority
         />
-
-        <ServerDemo className="mt-4" />
+        <Card className={cn("p-4")}>Hifu Navi Blog</Card>
       </main>
     </div>
   );

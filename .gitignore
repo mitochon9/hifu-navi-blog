@@ -75,3 +75,7 @@ override.tf.json
 terraform.rc
 *.tfvars
 !*.tfvars.example
+
+# tmp
+tmp/
+temp/
