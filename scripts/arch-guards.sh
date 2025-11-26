@@ -10,7 +10,7 @@ while IFS= read -r -d '' f; do
       *) EXPORT_VIOL+="$f\n" ;;
     esac
   fi
-done < <(find apps packages \( -path '*/node_modules/*' -o -path '*/dist/*' -o -path '*/.next/*' \) -prune -o -type f \( -name '*.ts' -o -name '*.tsx' \) -print0)
+done < <(find apps packages \( -path '*/node_modules/*' -o -path '*/dist/*' -o -path '*/.next/*' -o -path '*/.wrangler/*' \) -prune -o -type f \( -name '*.ts' -o -name '*.tsx' \) -print0)
 if [ -n "$EXPORT_VIOL" ]; then
   echo "違反: export * の使用が禁止されています（packages/** は許可）"
   echo -e "$EXPORT_VIOL" | while IFS= read -r line; do
@@ -38,11 +38,11 @@ fi
 
 echo "[guard] class/interface 禁止"
 CLASS_VIOL=$(find apps packages \
-  \( -path '*/node_modules/*' -o -path '*/dist/*' -o -path '*/.next/*' -o -path '*/build/*' -o -path '*/generated/*' \) -prune -o \
+  \( -path '*/node_modules/*' -o -path '*/dist/*' -o -path '*/.next/*' -o -path '*/build/*' -o -path '*/generated/*' -o -path '*/.wrangler/*' \) -prune -o \
   -type f \( -name '*.ts' -o -name '*.tsx' \) -print0 |
   xargs -0 grep -nE '^\s*(export\s+)?class\b' || true)
 INTF_VIOL=$(find apps packages \
-  \( -path '*/node_modules/*' -o -path '*/dist/*' -o -path '*/.next/*' -o -path '*/build/*' -o -path '*/generated/*' \) -prune -o \
+  \( -path '*/node_modules/*' -o -path '*/dist/*' -o -path '*/.next/*' -o -path '*/build/*' -o -path '*/generated/*' -o -path '*/.wrangler/*' \) -prune -o \
   -type f \( -name '*.ts' -o -name '*.tsx' \) -print0 |
   xargs -0 grep -nE '^\s*(export\s+)?interface\b' | grep -vE '\\.d\\.ts$' || true)
 if [ -n "$CLASS_VIOL" ]; then
