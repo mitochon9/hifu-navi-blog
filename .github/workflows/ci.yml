@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       client: ${{ steps.filter.outputs.client }}
-      server-node: ${{ steps.filter.outputs.server-node }}
+      api-service: ${{ steps.filter.outputs.api-service }}
       worker-node: ${{ steps.filter.outputs.worker-node }}
       packagesAll: ${{ steps.filter.outputs.packagesAll }}
       deps: ${{ steps.filter.outputs.deps }}
@@ -55,8 +55,8 @@ jobs:
               - 'packages/result/**'
               - 'packages/typescript-config/**'
               - 'packages/tailwind-config/**'
-            server-node:
-              - 'apps/server-node/**'
+            api-service:
+              - 'apps/api-service/**'
               - 'packages/database/**'
               - 'packages/server-kit/**'
               - 'packages/result/**'
@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     timeout-minutes: 20
-    if: needs.changes.outputs.client == 'true' || needs.changes.outputs.server-node == 'true' || needs.changes.outputs.worker-node == 'true' || needs.changes.outputs.packagesAll == 'true'
+    if: needs.changes.outputs.client == 'true' || needs.changes.outputs.api-service == 'true' || needs.changes.outputs.worker-node == 'true' || needs.changes.outputs.packagesAll == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -160,8 +160,8 @@ jobs:
           if [[ "${{ needs.changes.outputs.client }}" == "true" ]]; then
             FILTERS="$FILTERS --filter=client"
           fi
-          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
-            FILTERS="$FILTERS --filter=server-node"
+          if [[ "${{ needs.changes.outputs.api-service }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=api-service"
           fi
           if [[ "${{ needs.changes.outputs.worker-node }}" == "true" ]]; then
             FILTERS="$FILTERS --filter=worker-node"
@@ -175,12 +175,12 @@ jobs:
             bunx turbo run lint typecheck --concurrency=4 --cache-dir=.turbo $FILTERS
           fi
 
-          # server-node のユニットテストのみ（DB不要）
-          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
-            echo "Running server-node unit tests with coverage"
-            bunx turbo run test:unit --concurrency=2 --cache-dir=.turbo --filter=server-node -- --coverage
+          # api-service のユニットテストのみ（DB不要）
+          if [[ "${{ needs.changes.outputs.api-service }}" == "true" ]]; then
+            echo "Running api-service unit tests with coverage"
+            bunx turbo run test:unit --concurrency=2 --cache-dir=.turbo --filter=api-service -- --coverage
           else
-            echo "Skip unit tests (server-node unchanged)"
+            echo "Skip unit tests (api-service unchanged)"
           fi
 
       - name: Save Turbo cache
@@ -195,12 +195,12 @@ jobs:
           echo "🏗️ Running Architecture & FSD Checks in main pipeline..."
           SKIP_KNIP=1 bash scripts/architecture-check.sh
 
-      - name: Upload unit test coverage (server-node)
-        if: needs.changes.outputs.server-node == 'true'
+      - name: Upload unit test coverage (api-service)
+        if: needs.changes.outputs.api-service == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-unit-server-node
-          path: apps/server-node/coverage
+          name: coverage-unit-api-service
+          path: apps/api-service/coverage
           retention-days: 14
 
       - name: Build changed packages for PR
@@ -213,8 +213,8 @@ jobs:
           if [[ "${{ needs.changes.outputs.client }}" == "true" ]]; then
             FILTERS="$FILTERS --filter=client"
           fi
-          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
-            FILTERS="$FILTERS --filter=server-node"
+          if [[ "${{ needs.changes.outputs.api-service }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=api-service"
           fi
           if [[ "${{ needs.changes.outputs.worker-node }}" == "true" ]]; then
             FILTERS="$FILTERS --filter=worker-node"
@@ -448,11 +448,11 @@ jobs:
               });
             }
 
-  server-node-integration-tests:
-    name: Server Node Integration Tests
+  api-service-integration-tests:
+    name: API Service Integration Tests
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.server-node == 'true'
+    if: needs.changes.outputs.api-service == 'true'
     timeout-minutes: 20
     services:
       postgres:
@@ -532,17 +532,17 @@ jobs:
         run: |
           cd packages/database
           DATABASE_URL="postgresql://postgres:postgres@localhost:15432/test_db" bun run db:deploy
-      - name: Run server-node integration tests (with coverage)
-        working-directory: apps/server-node
+      - name: Run api-service integration tests (with coverage)
+        working-directory: apps/api-service
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:15432/test_db
           CI: true
         run: bun run coverage:integration
-      - name: Upload integration test coverage (server-node)
+      - name: Upload integration test coverage (api-service)
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-integration-server-node
-          path: apps/server-node/coverage
+          name: coverage-integration-api-service
+          path: apps/api-service/coverage
           retention-days: 14
 
 
