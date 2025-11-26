@@ -1,0 +1,7 @@
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+# CI モードで簡素ログ、テストは高速化（unit のみ）
+CI=true FAST=1 bun run check-all || exit 1
+
+

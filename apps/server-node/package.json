@@ -1,0 +1,37 @@
+{
+  "name": "server-node",
+  "scripts": {
+    "build": "bun run types",
+    "dev": "bash -c 'bun run types:watch & dotenv -e ../../.env -- bun run --hot src/index.ts'",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write --unsafe",
+    "typecheck": "tsc --noEmit",
+    "types": "tsc -p tsconfig.types.json",
+    "types:watch": "tsc -p tsconfig.types.json --watch --preserveWatchOutput",
+    "test": "bun test",
+    "test:unit": "bun test src/app.test.ts src/features",
+    "test:watch": "bun test --watch",
+    "test:integration": "bun test src/__tests__/integration",
+    "test:contract": "bun test src/__tests__/contract",
+    "coverage": "bun test --coverage",
+    "coverage:unit": "bun test --coverage src/app.test.ts src/features",
+    "coverage:integration": "bun test --coverage src/__tests__/integration",
+    "dep:cycles": "madge src --ts-config tsconfig.json --extensions ts --circular --exclude 'node_modules|dist|generated'",
+    "dep:orphans": "madge src/index.ts --ts-config tsconfig.json --extensions ts --orphans --exclude 'node_modules|dist|generated|(^|/)__tests__($|/)|(^|/).*\\.test\\.ts$|(^|/)src/index\\.ts$'",
+    "dep:graph": "madge src --ts-config tsconfig.json --extensions ts --image ../../docs/server-deps.svg --exclude 'node_modules|dist|generated'"
+  },
+  "dependencies": {
+    "@hono/standard-validator": "^0.1.5",
+    "@repo/contracts": "workspace:*",
+    "@repo/db": "workspace:*",
+    "@repo/result": "workspace:*",
+    "@repo/server-kit": "workspace:*",
+    "google-auth-library": "^10.5.0",
+    "hono": "^4.10.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "5.9.3"
+  }
+}

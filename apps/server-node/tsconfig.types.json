@@ -1,0 +1,33 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "composite": true,
+    "rootDir": "./src",
+    "outDir": "./dist-types",
+    "tsBuildInfoFile": "./dist-types/.tsbuildinfo",
+    "paths": {
+      "@app/*": ["./src/*"],
+      "@features/*": ["./src/features/*"],
+      "@shared/*": ["./src/shared/*"],
+      "@repo/server-kit": ["../../packages/server-kit/dist-types/index.d.ts"]
+    }
+  },
+  "include": [
+    "src/public.ts",
+    "src/types.ts",
+    "src/config.ts",
+    "src/container.ts",
+    "src/routes/**/*.ts",
+    "src/middlewares/**/*.ts",
+    "src/shared/**/*.ts",
+    "src/features/**/application/**/*.ts",
+    "src/features/**/domain/**/*.ts",
+    "src/features/**/infrastructure/**/*.ts",
+    "src/integrations/**/*.ts"
+  ],
+  "exclude": ["node_modules", "src/**/*.test.ts", "src/**/__tests__/**"]
+}

@@ -1,0 +1,548 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE/**'
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE/**'
+  schedule:
+    - cron: '0 18 * * *'  # 毎日 03:00 JST 相当
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      client: ${{ steps.filter.outputs.client }}
+      server-node: ${{ steps.filter.outputs.server-node }}
+      worker-node: ${{ steps.filter.outputs.worker-node }}
+      packagesAll: ${{ steps.filter.outputs.packagesAll }}
+      deps: ${{ steps.filter.outputs.deps }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            client:
+              - 'apps/client/**'
+              - 'packages/ui/**'
+              - 'packages/api-client/**'
+              - 'packages/result/**'
+              - 'packages/typescript-config/**'
+              - 'packages/tailwind-config/**'
+            server-node:
+              - 'apps/server-node/**'
+              - 'packages/database/**'
+              - 'packages/server-kit/**'
+              - 'packages/result/**'
+            worker-node:
+              - 'apps/worker-node/**'
+              - 'packages/server-kit/**'
+              - 'packages/result/**'
+            packagesAll:
+              - 'packages/**'
+            deps:
+              - '**/package.json'
+              - 'bun.lock'
+
+  ci:
+    name: CI Pipeline
+    runs-on: ubuntu-latest
+    needs: changes
+    timeout-minutes: 20
+    if: needs.changes.outputs.client == 'true' || needs.changes.outputs.server-node == 'true' || needs.changes.outputs.worker-node == 'true' || needs.changes.outputs.packagesAll == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.22'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Restore Bun cache
+        id: bun-cache-ci
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Restore Turbo cache
+        id: turbo-cache-ci
+        uses: actions/cache/restore@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.ref }}-${{ hashFiles('**/turbo.json', '**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.ref }}-
+            ${{ runner.os }}-turbo-refs/heads/main-
+            ${{ runner.os }}-turbo-
+
+      - name: Restore Prisma cache
+        id: prisma-cache-ci
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            packages/database/node_modules/.prisma
+            packages/database/node_modules/@prisma
+          key: ${{ runner.os }}-prisma-${{ hashFiles('packages/database/prisma/schema.prisma', 'packages/database/prisma/**/*.prisma') }}
+          restore-keys: |
+            ${{ runner.os }}-prisma-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Save Bun cache
+        if: steps.bun-cache-ci.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+
+      - name: Generate Prisma Client
+        if: steps.prisma-cache-ci.outputs.cache-hit != 'true'
+        run: |
+          cd packages/database
+          bun run db:generate
+        env:
+          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+
+      - name: Save Prisma cache
+        if: steps.prisma-cache-ci.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            packages/database/node_modules/.prisma
+            packages/database/node_modules/@prisma
+          key: ${{ runner.os }}-prisma-${{ hashFiles('packages/database/prisma/schema.prisma', 'packages/database/prisma/**/*.prisma') }}
+
+      - name: Run CI Quality Checks
+        env:
+          CI: true
+        run: |
+          set -euo pipefail
+          FILTERS=""
+          if [[ "${{ needs.changes.outputs.client }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=client"
+          fi
+          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=server-node"
+          fi
+          if [[ "${{ needs.changes.outputs.worker-node }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=worker-node"
+          fi
+
+          if [[ -z "$FILTERS" ]]; then
+            echo "No specific app changes; running lint/typecheck across repo"
+            bunx turbo run lint typecheck --concurrency=4 --cache-dir=.turbo
+          else
+            echo "Running lint/typecheck for changed packages: $FILTERS"
+            bunx turbo run lint typecheck --concurrency=4 --cache-dir=.turbo $FILTERS
+          fi
+
+          # server-node のユニットテストのみ（DB不要）
+          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
+            echo "Running server-node unit tests with coverage"
+            bunx turbo run test:unit --concurrency=2 --cache-dir=.turbo --filter=server-node -- --coverage
+          else
+            echo "Skip unit tests (server-node unchanged)"
+          fi
+
+      - name: Save Turbo cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.ref }}-${{ hashFiles('**/turbo.json', '**/package.json') }}
+
+      - name: Architecture & FSD Checks (no knip)
+        run: |
+          echo "🏗️ Running Architecture & FSD Checks in main pipeline..."
+          SKIP_KNIP=1 bash scripts/architecture-check.sh
+
+      - name: Upload unit test coverage (server-node)
+        if: needs.changes.outputs.server-node == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-server-node
+          path: apps/server-node/coverage
+          retention-days: 14
+
+      - name: Build changed packages for PR
+        if: github.event_name == 'pull_request'
+        env:
+          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+        run: |
+          set -euo pipefail
+          FILTERS=""
+          if [[ "${{ needs.changes.outputs.client }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=client"
+          fi
+          if [[ "${{ needs.changes.outputs.server-node }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=server-node"
+          fi
+          if [[ "${{ needs.changes.outputs.worker-node }}" == "true" ]]; then
+            FILTERS="$FILTERS --filter=worker-node"
+          fi
+          if [[ -z "$FILTERS" ]]; then
+            echo "No changes detected, skip build"
+          else
+            echo "Building changed packages: $FILTERS"
+            bunx turbo run build --concurrency=4 --cache-dir=.turbo $FILTERS
+          fi
+
+      - name: Build all packages for main branch
+        if: github.ref == 'refs/heads/main'
+        env:
+          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+        run: bunx turbo run build --concurrency=4 --cache-dir=.turbo
+
+      - name: Save Turbo cache after build
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-${{ github.ref }}-${{ hashFiles('**/turbo.json', '**/package.json') }}
+
+
+  knip-unused-code:
+    name: Unused Code Check (Knip)
+    runs-on: ubuntu-latest
+    needs: changes
+    # ラベル 'run:knip' が付いたPR、またはスケジュール時のみ
+    if: github.event_name == 'schedule' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run:knip'))
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.22'
+      - name: Restore Bun cache
+        id: bun-cache-knip
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Save Bun cache
+        if: steps.bun-cache-knip.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+      - name: Run Knip Check
+        id: knip
+        run: |
+          set -euo pipefail
+          NO_COLOR=1 bunx knip > knip-raw.txt 2>&1 || true
+          UNUSED_FILES=$(grep -E "^Unused files \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' || echo "0")
+          UNUSED_DEPS=$(grep -E "^Unused (dependencies|devDependencies) \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' | paste -sd+ | bc 2>/dev/null || echo "0")
+          UNUSED_EXPORTS=$(grep -E "^Unused exports \([0-9]+\)" knip-raw.txt | sed -E 's/.*\(([0-9]+)\).*/\1/' || echo "0")
+          UNUSED_FILES=${UNUSED_FILES:-0}
+          UNUSED_DEPS=${UNUSED_DEPS:-0}
+          UNUSED_EXPORTS=${UNUSED_EXPORTS:-0}
+          {
+            echo "## 🔍 Unused Code Check Results";
+            echo;
+            echo "### 📊 サマリー";
+            echo;
+            echo "| 項目 | 件数 |";
+            echo "|------|------|";
+            echo "| 未使用ファイル | $UNUSED_FILES |";
+            echo "| 未使用依存関係 | $UNUSED_DEPS |";
+            echo "| 未使用エクスポート | $UNUSED_EXPORTS |";
+            echo;
+            if [ "$UNUSED_FILES" != "0" ] || [ "$UNUSED_DEPS" != "0" ] || [ "$UNUSED_EXPORTS" != "0" ]; then
+              echo "### ⚠️ 結果: 未使用コードあり";
+              echo;
+              echo "<details>";
+              echo "<summary>Knip 出力を表示</summary>";
+              echo;
+              echo '```';
+              head -n 1000 knip-raw.txt || true;
+              echo '```';
+              echo "</details>";
+            else
+              echo "### ✅ 結果: 問題なし";
+              echo "未使用のコードは検出されませんでした。";
+            fi
+          } > knip-report.md
+      - name: Upload Knip Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: knip-report
+          path: knip-report.md
+      - name: Post Knip result as PR comment (sticky)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('knip-report.md', 'utf8');
+            const marker = '## 🔍 Unused Code Check Results';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const botComment = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  bun-audit-pr:
+    name: bun audit (Report)
+    runs-on: ubuntu-latest
+    needs: changes
+    # 依存変更時 or スケジュール時のみ（PR/Push共通）
+    if: github.event_name == 'schedule' || needs.changes.outputs.deps == 'true'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.22'
+      - name: Restore Bun cache
+        id: bun-cache-audit
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Save Bun cache
+        if: steps.bun-cache-audit.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+      - name: Run bun audit
+        id: audit
+        run: |
+          set +e
+          bun audit > audit-output.txt 2>&1
+          STATUS=$?
+          set -e
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          {
+            echo "## 🔒 セキュリティ監査結果 (bun audit)";
+            echo;
+            if [ "$STATUS" -eq 0 ]; then
+              echo "### ✅ 結果: 問題なし";
+              echo "依存関係に既知の脆弱性は検出されませんでした。";
+            else
+              echo "### ⚠️ 結果: 脆弱性あり";
+              echo;
+              echo "<details>";
+              echo "<summary>クリックして bun audit の詳細出力を表示</summary>";
+              echo;
+              echo '```';
+              head -1000 audit-output.txt || true;
+              echo '```';
+              echo "</details>";
+            fi
+          } > audit-report.md
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bun-audit-report
+          path: |
+            audit-output.txt
+            audit-report.md
+      - name: Post bun audit result as PR comment (sticky)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('audit-report.md', 'utf8');
+            const marker = '## 🔒 セキュリティ監査結果 (bun audit)';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const botComment = comments.find(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  server-node-integration-tests:
+    name: Server Node Integration Tests
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.server-node == 'true'
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 15432:5432
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.22'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Restore Bun cache
+        id: bun-cache-int
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Restore Prisma cache
+        id: prisma-cache-int
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            packages/database/node_modules/.prisma
+            packages/database/node_modules/@prisma
+          key: ${{ runner.os }}-prisma-${{ hashFiles('packages/database/prisma/schema.prisma', 'packages/database/prisma/**/*.prisma') }}
+          restore-keys: |
+            ${{ runner.os }}-prisma-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Save Bun cache
+        if: steps.bun-cache-int.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.bun
+            ~/.cache/bun
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+
+      - name: Generate Prisma Client
+        if: steps.prisma-cache-int.outputs.cache-hit != 'true'
+        run: |
+          cd packages/database
+          bun run db:generate
+        env:
+          DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
+
+      - name: Save Prisma cache
+        if: steps.prisma-cache-int.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            packages/database/node_modules/.prisma
+            packages/database/node_modules/@prisma
+          key: ${{ runner.os }}-prisma-${{ hashFiles('packages/database/prisma/schema.prisma', 'packages/database/prisma/**/*.prisma') }}
+      - name: Prepare database schema
+        run: |
+          cd packages/database
+          DATABASE_URL="postgresql://postgres:postgres@localhost:15432/test_db" bun run db:deploy
+      - name: Run server-node integration tests (with coverage)
+        working-directory: apps/server-node
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:15432/test_db
+          CI: true
+        run: bun run coverage:integration
+      - name: Upload integration test coverage (server-node)
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration-server-node
+          path: apps/server-node/coverage
+          retention-days: 14
+
+

@@ -1,0 +1,37 @@
+project_id = "your-gcp-project-id"
+region     = "asia-northeast1"
+location   = "asia-northeast1"
+
+# Resource Name Prefix
+# All resources starting with "ax-" will use this prefix by default
+# e.g. prefix="myprj" -> myprj-vpc, myprj-server, etc.
+prefix = "ax"
+
+# Individual resource names (optional overrides)
+# If not set, they will be generated using the prefix
+# run_service_name_server = "ax-server"
+# run_service_name_worker = "ax-worker"
+# run_service_name_client = "ax-client"
+
+# Cloud Tasks queue name
+tasks_queue_name = "demo-queue"
+
+# Environment variables for server (optional overrides)
+server_env = {}
+
+# Environment variables for worker (optional overrides)
+worker_env = {}
+
+# Environment variables for client (optional overrides)
+client_env = {}
+
+# Cloud SQL
+db_user       = "appuser"
+db_password   = "<CHANGE_ME_STRONG_PASSWORD>"
+db_database_name = "app"
+
+# Load Balancer Domain (optional)
+# HTTPSを有効化する場合は以下を設定
+# enable_ssl = true
+# load_balancer_domain = "yourdomain.com"
+# 詳細は docs/domain-setup.md を参照してください

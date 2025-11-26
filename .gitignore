@@ -1,0 +1,77 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Local env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.deploy
+**/env.deploy
+
+# Testing
+coverage
+
+# Turbo
+.turbo
+
+# Vercel
+.vercel
+
+# Build Outputs
+.next/
+out/
+build
+dist
+**/next-env.d.ts
+
+# Monorepo build outputs
+apps/**/dist
+apps/**/dist-types
+packages/**/dist
+packages/**/dist-types
+
+# Server kit generated type artifacts in source (keep database/src/index.d.ts tracked)
+packages/server-kit/src/*.d.ts
+packages/server-kit/src/*.d.ts.map
+packages/database/src/index.d.ts
+packages/database/src/index.d.ts.map
+
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# TypeScript build info caches
+**/tsconfig.tsbuildinfo
+**/*.tsbuildinfo
+
+# Misc
+.DS_Store
+*.pem
+packages/database/generated/prisma
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+tfplan
+tfplan*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+*.tfvars
+!*.tfvars.example

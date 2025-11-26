@@ -1,0 +1,23 @@
+{
+  "name": "worker-node",
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- bun run --hot src/index.ts",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write --unsafe",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
+  },
+  "dependencies": {
+    "@hono/standard-validator": "^0.1.5",
+    "@repo/contracts": "workspace:*",
+    "@repo/result": "workspace:*",
+    "@repo/server-kit": "workspace:*",
+    "hono": "^4.10.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "5.9.3"
+  }
+}

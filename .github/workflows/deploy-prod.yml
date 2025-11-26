@@ -1,0 +1,481 @@
+name: deploy-prod
+# 初期状態では無効化されています
+# 有効化する場合は、以下のコメントアウトを解除してください
+# on:
+#   push:
+#     tags: ['v*']
+on:
+  workflow_dispatch:  # 手動実行のみ可能（デフォルトは無効）
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: true
+
+env:
+  REGION: asia-northeast1
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID_PRD }}
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_PRD }}
+          service_account: ${{ secrets.WIF_SA_PRD }}
+          export_environment_variables: true
+          create_credentials_file: true
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build & Push (server/worker/client)
+        run: |
+          set -euo pipefail
+          echo "=== Build & Push ==="
+          echo "PROJECT_ID: ${PROJECT_ID}"
+          echo "REGION: ${REGION}"
+          echo ""
+          bash infra/terraform/scripts/build-push.sh || {
+            echo "❌ Error: Build & Push failed"
+            echo "  Check the error output above for details"
+            echo ""
+            echo "  Common issues:"
+            echo "    - Docker buildx not available"
+            echo "    - Artifact Registry permissions"
+            echo "    - Network connectivity issues"
+            exit 1
+          }
+        env:
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+          REGION: ${{ env.REGION }}
+
+  apply:
+    runs-on: ubuntu-latest
+    needs: build-push
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_PRD }}
+          service_account: ${{ secrets.WIF_SA_PRD }}
+          export_environment_variables: true
+          create_credentials_file: true
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Restore Terraform providers cache
+        id: tf-cache-apply
+        uses: actions/cache/restore@v4
+        with:
+          path: infra/terraform/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('infra/terraform/**/*.tf', 'infra/terraform/**/*.tfvars') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      - name: Who am I (gcloud)
+        run: |
+          gcloud auth list
+          gcloud config list project
+
+      - name: Check TF state bucket exists
+        run: |
+          set -euo pipefail
+          echo "=== Check Terraform State Bucket ==="
+          echo ""
+          
+          BUCKET_RAW='${{ secrets.TFSTATE_BUCKET_PRD }}'
+          if [ -z "${BUCKET_RAW}" ]; then
+            echo "❌ Error: TFSTATE_BUCKET_PRD secret is required"
+            echo "  Ensure the secret is configured in GitHub repository settings"
+            exit 1
+          fi
+          
+          # Normalize and validate
+          BUCKET_NAME=${BUCKET_RAW#gs://}
+          BUCKET_NAME=${BUCKET_NAME#file://}
+          
+          if ! echo "$BUCKET_NAME" | grep -qE '^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$'; then
+            echo "❌ Error: Invalid TFSTATE_BUCKET_PRD format"
+            echo "  Value: ${BUCKET_RAW}"
+            echo "  Expected: bucket name or gs://<bucket>"
+            echo "  Valid bucket names: 3-63 characters, lowercase letters, numbers, dots, dashes, underscores"
+            exit 1
+          fi
+          
+          echo "  Bucket name: ${BUCKET_NAME}"
+          echo ""
+          
+          echo "📋 Checking bucket access..."
+          if ! gsutil ls -b gs://${BUCKET_NAME} >/dev/null 2>&1; then
+            echo "❌ Error: Terraform state bucket does not exist or is not accessible"
+            echo "  Bucket: gs://${BUCKET_NAME}"
+            echo "  Project: ${{ env.PROJECT_ID }}"
+            echo ""
+            echo "  Check:"
+            echo "    1. Bucket exists: gsutil ls -b gs://${BUCKET_NAME}"
+            echo "    2. You have permissions to access the bucket"
+            echo "    3. Bucket is in the correct project"
+            exit 1
+          fi
+          
+          echo "  ✓ Bucket exists and is accessible"
+          
+          # List contents (non-fatal)
+          echo "  Listing bucket contents..."
+          gsutil ls gs://${BUCKET_NAME} >/dev/null 2>&1 || echo "    (Bucket is empty or listing is restricted)"
+
+      - name: Enable core Google APIs (idempotent)
+        run: |
+          gcloud services enable \
+            serviceusage.googleapis.com \
+            cloudresourcemanager.googleapis.com \
+            --project "${{ env.PROJECT_ID }}"
+          # API有効化の伝播を待つ（初回のみ時間がかかる）
+          gcloud services list --enabled --project "${{ env.PROJECT_ID }}" --filter="name:serviceusage.googleapis.com OR name:cloudresourcemanager.googleapis.com" --format="value(name)" | head -2 | wc -l | xargs -I {} test {} -eq 2 || sleep 3
+
+      - name: Cleanup stale Terraform lock
+        run: |
+          set -euo pipefail
+          BUCKET_RAW='${{ secrets.TFSTATE_BUCKET_PRD }}'
+          BUCKET_NAME=${BUCKET_RAW#gs://}
+          BUCKET_NAME=${BUCKET_NAME#file://}
+          echo "Cleaning up stale lock if any..."
+          gsutil rm -f gs://${BUCKET_NAME}/prod/terraform.tfstate/default.tflock || true
+          echo "✓ Lock cleanup completed"
+
+      - name: Get DB password from database-url or secret
+        id: get-db-password
+        env:
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+        run: |
+          set -eo pipefail
+          echo "=== Getting DB Password ==="
+          echo ""
+          
+          # まずdatabase-urlからパスワードを取得を試行
+          echo "📋 Trying to get password from database-url..."
+          set +e
+          DATABASE_URL=$(gcloud secrets versions access latest \
+            --secret="database-url" \
+            --project="${PROJECT_ID}" 2>&1)
+          SECRET_CODE=${PIPESTATUS[0]}
+          set -e
+          
+          if [ ${SECRET_CODE} -eq 0 ] && [ -n "${DATABASE_URL}" ]; then
+            echo "  ✓ database-url found"
+            # database-urlからパスワードを抽出
+            PASSWORD=$(echo "${DATABASE_URL}" | sed -n 's|postgresql://[^:]*:\([^@]*\)@.*|\1|p' | python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))' 2>/dev/null || echo "")
+            if [ -n "${PASSWORD}" ]; then
+              echo "  ✓ Password extracted from database-url"
+              echo "DB_PASSWORD=${PASSWORD}" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "  ⚠ Password is empty in database-url"
+              echo "  Falling back to DB_PASSWORD_PRD secret"
+            fi
+          fi
+          
+          # database-urlがない場合、DB_PASSWORD_PRDシークレットを使用
+          echo "  database-url not found or empty, trying DB_PASSWORD_PRD secret..."
+          if [ -n "${{ secrets.DB_PASSWORD_PRD }}" ]; then
+            echo "  ✓ Using DB_PASSWORD_PRD secret"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD_PRD }}" >> $GITHUB_OUTPUT
+          else
+            echo "⚠ Warning: Neither database-url nor DB_PASSWORD_PRD found"
+            echo "  This will cause Terraform apply to fail"
+            echo "  Ensure either database-url exists or DB_PASSWORD_PRD is set"
+            exit 1
+          fi
+
+      - name: Terraform Apply (prod)
+        working-directory: infra/terraform
+        env:
+          TF_VAR_project_id: ${{ env.PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+          TF_VAR_db_password: ${{ steps.get-db-password.outputs.DB_PASSWORD }}
+          TF_VAR_deployer_service_account: ${{ secrets.WIF_SA_PRD }}
+          GOOGLE_PROJECT: ${{ env.PROJECT_ID }}
+          BUCKET_NAME: ${{ secrets.TFSTATE_BUCKET_PRD }}
+          BACKEND_PREFIX: prod/terraform.tfstate
+        run: bash scripts/terraform-apply.sh
+
+      - name: Save Terraform providers cache
+        if: steps.tf-cache-apply.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: infra/terraform/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('infra/terraform/**/*.tf', 'infra/terraform/**/*.tfvars') }}
+
+      - name: Sync Cloud SQL password from Secret Manager
+        working-directory: infra/terraform
+        env:
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+          INSTANCE: ax-db
+          USER: appuser
+          DB_PASSWORD: ${{ steps.get-db-password.outputs.DB_PASSWORD }}
+        run: |
+          set -eo pipefail
+          echo "=== Sync Cloud SQL Password ==="
+          echo ""
+          
+          # DB_PASSWORDが設定されていない場合はスキップ
+          if [ -z "${DB_PASSWORD}" ]; then
+            echo "⚠ Warning: DB_PASSWORD is not set"
+            echo "  Skipping password synchronization."
+            exit 0
+          fi
+          
+          # secret-sync-db-url.shを使用して同期
+          echo "📋 Using secret-sync-db-url.sh to sync password..."
+          echo "  Instance: ${INSTANCE}"
+          echo "  User: ${USER}"
+          echo ""
+          
+          # PASSWORD環境変数を設定（secret-sync-db-url.shが使用）
+          export PASSWORD="${DB_PASSWORD}"
+          
+          # secret-sync-db-url.shを実行
+          bash scripts/secret-sync-db-url.sh || {
+            echo "❌ Error: Failed to sync database-url and Cloud SQL password"
+            echo "  Check the error output above for details"
+            exit 1
+          }
+          
+          echo "✓ Cloud SQL password synchronized successfully"
+
+  migrate:
+    runs-on: ubuntu-latest
+    needs: apply
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_PRD }}
+          service_account: ${{ secrets.WIF_SA_PRD }}
+          export_environment_variables: true
+          create_credentials_file: true
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Restore Terraform providers cache
+        id: tf-cache-migrate
+        uses: actions/cache/restore@v4
+        with:
+          path: infra/terraform/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('infra/terraform/**/*.tf', 'infra/terraform/**/*.tfvars') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      - name: Terraform Init (for outputs)
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          echo "=== Terraform Init (for outputs) ==="
+          echo ""
+          
+          BUCKET_RAW='${{ secrets.TFSTATE_BUCKET_PRD }}'
+          if [ -z "${BUCKET_RAW}" ]; then
+            echo "❌ Error: TFSTATE_BUCKET_PRD secret is required"
+            exit 1
+          fi
+          
+          BUCKET_NAME=${BUCKET_RAW#gs://}
+          BUCKET_NAME=${BUCKET_NAME#file://}
+          
+          echo "📋 Initializing Terraform backend..."
+          echo "  Bucket: ${BUCKET_NAME}"
+          echo "  Prefix: prod/terraform.tfstate"
+          echo ""
+          
+          terraform init -upgrade -reconfigure \
+            -backend-config="bucket=${BUCKET_NAME}" \
+            -backend-config="prefix=prod/terraform.tfstate" || {
+            echo "❌ Error: Terraform init failed"
+            echo "  Check:"
+            echo "    1. Bucket exists and is accessible"
+            echo "    2. Backend configuration is correct"
+            echo "    3. Terraform state file is not corrupted"
+            exit 1
+          }
+          
+          echo "  ✓ Terraform initialized"
+
+      - name: Save Terraform providers cache
+        if: steps.tf-cache-migrate.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: infra/terraform/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('infra/terraform/**/*.tf', 'infra/terraform/**/*.tfvars') }}
+
+      - name: Run DB Migration Job (prod)
+        working-directory: infra/terraform
+        env:
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+          REGION: ${{ env.REGION }}
+          TF_DIR: .
+        run: |
+          # jqのインストール確認（GitHub Actionsのubuntu-latestにはデフォルトでインストール済み）
+          if ! command -v jq &> /dev/null; then
+            echo "⚠ Warning: jq is not installed, installing..."
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          bash scripts/run-migration.sh
+
+  rollout:
+    runs-on: ubuntu-latest
+    needs: migrate
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER_PRD }}
+          service_account: ${{ secrets.WIF_SA_PRD }}
+          export_environment_variables: true
+          create_credentials_file: true
+          token_format: access_token
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Restore Terraform providers cache
+        id: tf-cache-rollout
+        uses: actions/cache/restore@v4
+        with:
+          path: infra/terraform/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('infra/terraform/**/*.tf', 'infra/terraform/**/*.tfvars') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      - name: Get DB password from database-url or secret
+        id: get-db-password-rollout
+        env:
+          PROJECT_ID: ${{ env.PROJECT_ID }}
+        run: |
+          set -eo pipefail
+          echo "=== Getting DB Password ==="
+          echo ""
+          
+          # まずdatabase-urlからパスワードを取得を試行
+          echo "📋 Trying to get password from database-url..."
+          set +e
+          DATABASE_URL=$(gcloud secrets versions access latest \
+            --secret="database-url" \
+            --project="${PROJECT_ID}" 2>&1)
+          SECRET_CODE=${PIPESTATUS[0]}
+          set -e
+          
+          if [ ${SECRET_CODE} -eq 0 ] && [ -n "${DATABASE_URL}" ]; then
+            echo "  ✓ database-url found"
+            # database-urlからパスワードを抽出
+            PASSWORD=$(echo "${DATABASE_URL}" | sed -n 's|postgresql://[^:]*:\([^@]*\)@.*|\1|p' | python3 -c 'import sys, urllib.parse; print(urllib.parse.unquote(sys.stdin.read().strip()))' 2>/dev/null || echo "")
+            if [ -n "${PASSWORD}" ]; then
+              echo "  ✓ Password extracted from database-url"
+              echo "DB_PASSWORD=${PASSWORD}" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "  ⚠ Password is empty in database-url"
+              echo "  Falling back to DB_PASSWORD_PRD secret"
+            fi
+          fi
+          
+          # database-urlがない場合、DB_PASSWORD_PRDシークレットを使用
+          echo "  database-url not found or empty, trying DB_PASSWORD_PRD secret..."
+          if [ -n "${{ secrets.DB_PASSWORD_PRD }}" ]; then
+            echo "  ✓ Using DB_PASSWORD_PRD secret"
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD_PRD }}" >> $GITHUB_OUTPUT
+          else
+            echo "⚠ Warning: Neither database-url nor DB_PASSWORD_PRD found"
+            echo "  This will cause Terraform apply to fail"
+            echo "  Ensure either database-url exists or DB_PASSWORD_PRD is set"
+            exit 1
+          fi
+
+      - name: Terraform Rollout (force new revisions)
+        working-directory: infra/terraform
+        env:
+          TF_VAR_project_id: ${{ env.PROJECT_ID }}
+          TF_VAR_region: ${{ env.REGION }}
+          TF_VAR_db_password: ${{ steps.get-db-password-rollout.outputs.DB_PASSWORD }}
+          TF_VAR_deployer_service_account: ${{ secrets.WIF_SA_PRD }}
+          GOOGLE_PROJECT: ${{ env.PROJECT_ID }}
+          BUCKET_NAME: ${{ secrets.TFSTATE_BUCKET_PRD }}
+          BACKEND_PREFIX: prod/terraform.tfstate
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "=== Terraform Rollout ==="
+          echo "COMMIT_SHA: ${COMMIT_SHA}"
+          echo ""
+          
+          # バケット名の正規化
+          BUCKET_NAME="${BUCKET_NAME#gs://}"
+          BUCKET_NAME="${BUCKET_NAME#file://}"
+          
+          # Terraform の初期化
+          echo "📋 Initializing Terraform backend..."
+          terraform init -upgrade -reconfigure \
+            -backend-config="bucket=${BUCKET_NAME}" \
+            -backend-config="prefix=${BACKEND_PREFIX}" || {
+            echo "❌ Error: Terraform init failed"
+            exit 1
+          }
+          echo "  ✓ Terraform initialized"
+          echo ""
+          
+          # SERVER_INTERNAL_URL を取得
+          echo "📋 Getting SERVER_INTERNAL_URL from outputs..."
+          SERVER_URI=$(terraform output -raw run_server_url 2>&1 || echo "")
+          if [ -z "${SERVER_URI}" ] || echo "${SERVER_URI}" | grep -q "Error"; then
+            echo "❌ Error: Failed to get run_server_url from Terraform output"
+            echo "  Output: ${SERVER_URI}"
+            echo ""
+            echo "  Available outputs:"
+            terraform output || true
+            exit 1
+          fi
+          echo "  Server URL: ${SERVER_URI}"
+          echo ""
+          
+          # ロールアウト実行（BUILD_SHA と SERVER_INTERNAL_URL を設定）
+          echo "🚀 Running Terraform apply (rollout with BUILD_SHA)..."
+          SERVER_ENV="BUILD_SHA=\"${COMMIT_SHA}\",SERVER_INTERNAL_URL=\"${SERVER_URI}\""
+          terraform apply -auto-approve -input=false -lock-timeout=10m \
+            -var="server_env={${SERVER_ENV}}" \
+            -var="worker_env={BUILD_SHA=\"${COMMIT_SHA}\"}" \
+            -var="client_env={BUILD_SHA=\"${COMMIT_SHA}\"}" || {
+            echo "❌ Error: Terraform apply failed during rollout"
+            echo "  Commit SHA: ${COMMIT_SHA}"
+            echo "  Server URL: ${SERVER_URI}"
+            echo "  Check the error output above for details"
+            exit 1
+          }
+          echo "  ✓ Rollout completed"
+          echo ""
+          echo "✓ Terraform rollout completed successfully"
+
+      - name: Save Terraform providers cache
+        if: steps.tf-cache-rollout.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: infra/terraform/.terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('infra/terraform/**/*.tf', 'infra/terraform/**/*.tfvars') }}
