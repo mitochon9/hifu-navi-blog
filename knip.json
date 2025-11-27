@@ -13,11 +13,17 @@
     "packages/database/prisma/migrations/**",
     "apps/server-node/src/__tests__/**",
     "apps/server-node/src/**/*.test.ts",
-    "apps/server-node/src/public.ts"
+    "apps/server-node/src/public.ts",
+    "apps/client/shared/lib/api-client.ts"
   ],
   "ignoreFiles": ["steiger.config.mjs"],
   "ignoreIssues": {
     "apps/client/components/ui/**": ["exports", "types"],
+    "apps/client/shared/lib/api-client.ts": ["exports"],
+    "apps/client/lib/mock/clinics.ts": ["exports"],
+    "apps/client/lib/mock/devices.ts": ["exports"],
+    "apps/client/lib/mock/plans.ts": ["exports"],
+    "apps/client/lib/mock/types.ts": ["exports", "types"],
 
     "packages/typescript-config/*.json": ["unresolved"]
   },

@@ -1,5 +1,8 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.3.4/schema.json",
+  "files": {
+    "ignoreUnknown": true
+  },
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -71,6 +74,11 @@
       "trailingCommas": "none"
     }
   },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
   "overrides": [
     {
       "includes": [
@@ -90,11 +98,10 @@
         "packages/ui/src/styles.css"
       ],
       "linter": {
-        "rules": {
-          "suspicious": {
-            "noUnknownAtRules": "off"
-          }
-        }
+        "enabled": false
+      },
+      "formatter": {
+        "enabled": false
       }
     },
     {

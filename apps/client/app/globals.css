@@ -1,3 +1,66 @@
 @import "tailwindcss";
 @import "@repo/tailwind-config";
 @import "tw-animate-css";
+
+/* Override font variables for HIFU Navi */
+@theme inline {
+  --font-sans: var(--font-noto-sans-jp), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+}
+
+/* HIFU Navi color scheme - medical trust, clean aesthetic */
+:root {
+  /* Accent: Calm teal for medical trust */
+  --accent-brand: oklch(0.55 0.12 190);
+  --accent-brand-foreground: oklch(0.98 0 0);
+
+  /* Override primary to teal accent */
+  --primary: oklch(0.55 0.12 190);
+  --primary-foreground: oklch(0.98 0 0);
+
+  /* Subtle warm gray for softer feel */
+  --muted: oklch(0.975 0.002 80);
+  --muted-foreground: oklch(0.48 0.01 250);
+
+  /* Card with subtle shadow-friendly bg */
+  --card: oklch(0.995 0 0);
+  --card-foreground: oklch(0.18 0 0);
+
+  /* Border: slightly warmer */
+  --border: oklch(0.92 0.005 80);
+}
+
+.dark {
+  --accent-brand: oklch(0.7 0.12 190);
+  --accent-brand-foreground: oklch(0.15 0 0);
+
+  --primary: oklch(0.7 0.12 190);
+  --primary-foreground: oklch(0.15 0 0);
+
+  --muted: oklch(0.22 0.005 250);
+  --muted-foreground: oklch(0.65 0.01 250);
+
+  --card: oklch(0.18 0.005 250);
+  --card-foreground: oklch(0.95 0 0);
+
+  --border: oklch(0.28 0.005 250);
+}
+
+/* Utility classes for price display with monospace numbers */
+.price-display {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* Smooth page transitions */
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Better focus styles for accessibility */
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+}
